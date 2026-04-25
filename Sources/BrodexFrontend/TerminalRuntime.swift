@@ -128,6 +128,7 @@ final class TerminalSessionController: NSObject, LocalProcessTerminalViewDelegat
 /// overlap the prompt row and look like a rendering glitch, so we ignore them.
 final class BrodexTerminalView: LocalProcessTerminalView {
     private var oscBuffer: [UInt8] = []
+    private var refreshScheduled = false
 
     func insertTextAtCursor(_ text: String) {
         insertText(text, replacementRange: NSRange(location: 0, length: 0))
@@ -199,8 +200,12 @@ final class BrodexTerminalView: LocalProcessTerminalView {
     }
 
     private func scheduleFullRefreshIfVisible() {
+        guard !refreshScheduled else { return }
+        refreshScheduled = true
         DispatchQueue.main.async { [weak self] in
-            self?.refreshVisibleSurface()
+            guard let self else { return }
+            self.refreshScheduled = false
+            self.refreshVisibleSurface()
         }
     }
 

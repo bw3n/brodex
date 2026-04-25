@@ -3,6 +3,8 @@ import SwiftUI
 
 @MainActor
 final class WindowCoordinator: NSObject, NSWindowDelegate {
+    private let presentedPanelHorizontalPadding: CGFloat = 24
+    private let presentedPanelBottomPadding: CGFloat = 16
     private let viewModel: NotchBroViewModel
     private var window: NSWindow?
     private var pendingHideWorkItem: DispatchWorkItem?
@@ -128,8 +130,12 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
 
     private func updateWindow(animated: Bool, requestFocus: Bool = false) {
         let frame = windowFrame()
-        window?.level = .statusBar
-        window?.setFrame(frame, display: true, animate: animated)
+        if window?.level != .statusBar {
+            window?.level = .statusBar
+        }
+        if window?.frame != frame {
+            window?.setFrame(frame, display: true, animate: animated)
+        }
         syncWindowFocus(requestFocus: requestFocus)
         syncWindowVisibilityAfterInteraction(requestFocus: requestFocus)
         (window?.contentView as? NotchContainerView)?.refreshClosedInteraction()
@@ -196,16 +202,36 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
     }
 
     private func windowFrame() -> NSRect {
-        let screen = NSScreen.main ?? NSScreen.screens.first ?? NSScreen()
-        let screenFrame = screen.frame
-        let width = max(viewModel.terminalWidth + 120, viewModel.restingNotchWidth + 120, 320)
-        let height = max(0, viewModel.terminalHeight + 12)
+        let screenFrame = (NSScreen.brodexPreferredScreen ?? NSScreen.main ?? NSScreen.screens.first)?.frame ?? .zero
+        let width = max(windowFrameSize.width, 320)
+        let height = max(0, windowFrameSize.height)
 
         return NSRect(
             x: screenFrame.midX - (width / 2),
             y: screenFrame.maxY - height,
             width: width,
             height: height
+        )
+    }
+
+    private var windowFrameSize: CGSize {
+        let contentSize = CGSize(width: viewModel.windowWidth, height: viewModel.windowHeight)
+
+        if viewModel.panelVisible || viewModel.closedDropPreviewVisible {
+            return CGSize(
+                width: contentSize.width + (presentedPanelHorizontalPadding * 2),
+                height: contentSize.height + presentedPanelBottomPadding
+            )
+        }
+
+        let closedInteractionSize = CGSize(
+            width: max(viewModel.restingNotchWidth + 84, 260),
+            height: max(viewModel.restingNotchHeight + 26, 58)
+        )
+
+        return CGSize(
+            width: max(contentSize.width, closedInteractionSize.width),
+            height: max(contentSize.height, closedInteractionSize.height)
         )
     }
 }
@@ -225,6 +251,22 @@ private final class NotchPanel: NSPanel {
             return
         }
         super.sendEvent(event)
+    }
+}
+
+private extension NSScreen {
+    static var brodexPreferredScreen: NSScreen? {
+        if let builtin = screens.first(where: \.brodexIsBuiltinDisplay) {
+            return builtin
+        }
+        return NSScreen.main ?? screens.first
+    }
+
+    var brodexIsBuiltinDisplay: Bool {
+        guard let screenNumber = deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else {
+            return false
+        }
+        return CGDisplayIsBuiltin(screenNumber) != 0
     }
 }
 

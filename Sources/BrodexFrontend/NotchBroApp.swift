@@ -3,7 +3,7 @@ import SwiftUI
 
 @main
 struct BrodexFrontend: App {
-    @State private var viewModel = NotchBroViewModel()
+    @State private var viewModel: NotchBroViewModel
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
@@ -13,18 +13,21 @@ struct BrodexFrontend: App {
     }
 
     init() {
+        let viewModel = NotchBroViewModel()
+        _viewModel = State(initialValue: viewModel)
         AppDelegate.sharedViewModel = viewModel
     }
 }
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    static var sharedViewModel = NotchBroViewModel()
+    static var sharedViewModel: NotchBroViewModel?
     private var windowCoordinator: WindowCoordinator?
     private var statusItemController: StatusItemController?
-    private var viewModel: NotchBroViewModel { Self.sharedViewModel }
+    private var viewModel: NotchBroViewModel? { Self.sharedViewModel }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard let viewModel else { return }
         NSApplication.shared.setActivationPolicy(.accessory)
         let coordinator = WindowCoordinator(viewModel: viewModel)
         coordinator.show()
