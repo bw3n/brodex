@@ -5,7 +5,6 @@ struct ExpandedPanelView: View {
     @Bindable var viewModel: NotchBroViewModel
     let onCloseBubble: () -> Void
     let onLayoutChange: () -> Void
-    private let shellAnimation = Animation.spring(response: 0.34, dampingFraction: 0.84)
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -24,8 +23,8 @@ struct ExpandedPanelView: View {
             )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .animation(shellAnimation, value: viewModel.shellState)
-        .animation(shellAnimation, value: viewModel.dropInteractionState)
+        .animation(viewModel.shellTransitionAnimation, value: viewModel.shellState)
+        .animation(viewModel.shellTransitionAnimation, value: viewModel.dropInteractionState)
         .onAppear {
             onLayoutChange()
         }
