@@ -4,8 +4,9 @@ set -euo pipefail
 ROOT_DIR=$(cd "$(dirname "$0")/.." && pwd)
 DIST_DIR="$ROOT_DIR/dist"
 APP_NAME="Brodex"
-LOGO_SOURCE="/Users/jerng5/Desktop/PNG/BRODEX.png"
+LOGO_SOURCE="$ROOT_DIR/Packaging/BRODEX.png"
 APP_DIR="$DIST_DIR/${APP_NAME}.app"
+ZIP_PATH="$DIST_DIR/${APP_NAME}.app.zip"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
@@ -17,20 +18,19 @@ swift build -c release --package-path "$ROOT_DIR"
 BIN_DIR=$(swift build -c release --package-path "$ROOT_DIR" --show-bin-path)
 EXECUTABLE_PATH="$BIN_DIR/BrodexV1Frontend"
 
-if [[ ! -f "$LOGO_SOURCE" ]]; then
-  echo "Logo source not found at $LOGO_SOURCE" >&2
-  exit 1
-fi
-
 if [[ ! -x "$EXECUTABLE_PATH" ]]; then
   echo "Release executable not found at $EXECUTABLE_PATH" >&2
   exit 1
 fi
 
-rm -rf "$APP_DIR" "$ICONSET_DIR"
+rm -rf "$APP_DIR" "$ICONSET_DIR" "$ZIP_PATH"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
-echo "Generating app icon from $LOGO_SOURCE..."
+if [[ -f "$LOGO_SOURCE" ]]; then
+  echo "Generating app icon from $LOGO_SOURCE..."
+else
+  echo "No repo icon found at $LOGO_SOURCE; generating fallback app icon..."
+fi
 swift "$ROOT_DIR/Scripts/generate_placeholder_icon.swift" "$LOGO_SOURCE" "$ICONSET_DIR"
 iconutil -c icns "$ICONSET_DIR" -o "$ICON_FILE"
 rm -rf "$ICONSET_DIR"
@@ -43,5 +43,10 @@ chmod +x "$MACOS_DIR/$APP_NAME"
 echo "Signing app bundle..."
 codesign --force --deep --sign - "$APP_DIR"
 
+echo "Creating zip archive..."
+ditto -c -k --sequesterRsrc --keepParent "$APP_DIR" "$ZIP_PATH"
+
 echo "Packaged app at:"
 echo "  $APP_DIR"
+echo "Shareable zip at:"
+echo "  $ZIP_PATH"

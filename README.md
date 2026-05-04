@@ -18,19 +18,29 @@ cd /Users/jerng5/Desktop/BRODEX/V3
 ./Scripts/package_app.sh
 ```
 
-The packaging script currently uses this logo source for the app icon:
+The packaging script looks for an optional repo icon at:
 
 ```text
-/Users/jerng5/Desktop/PNG/BRODEX.png
+/Users/jerng5/Desktop/BRODEX/V3/Packaging/BRODEX.png
 ```
+
+If that file is missing, it generates a fallback icon automatically.
 
 This creates:
 
 ```text
 /Users/jerng5/Desktop/BRODEX/V3/dist/Brodex.app
+/Users/jerng5/Desktop/BRODEX/V3/dist/Brodex.app.zip
 ```
 
 The packaged app is configured as a utility app:
 - no Dock icon
 - menu bar icon
 - notch terminal behavior preserved
+
+## Share with friends
+
+Upload `dist/Brodex.app.zip` to a GitHub Release. Friends can download the zip,
+extract `Brodex.app`, and open it on macOS. Because this build uses ad-hoc
+signing instead of a paid Apple Developer ID, macOS may ask them to use
+right-click > `Open` the first time they launch it.
