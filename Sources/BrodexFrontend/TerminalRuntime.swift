@@ -9,6 +9,7 @@ protocol TerminalSessionControllerDelegate: AnyObject {
 
 @MainActor
 final class TerminalSessionController: NSObject, LocalProcessTerminalViewDelegate {
+    private let scrollbackLineCount = 20_000
     let shellPath: String
     let workingDirectory: String
     let terminalView: BrodexTerminalView
@@ -39,6 +40,7 @@ final class TerminalSessionController: NSObject, LocalProcessTerminalViewDelegat
         terminalView.processDelegate = self
         terminalView.autoresizingMask = [.width, .height]
         terminalView.configureNativeColors()
+        terminalView.changeScrollback(scrollbackLineCount)
         terminalView.nativeForegroundColor = .white
         terminalView.nativeBackgroundColor = NSColor(
             calibratedRed: 0.02,

@@ -4,8 +4,11 @@ import SwiftUI
 @MainActor
 final class WindowCoordinator: NSObject, NSWindowDelegate {
     private let viewModel: NotchBroViewModel
+    private let windowHorizontalPadding: CGFloat = 120
+    private let windowVerticalPadding: CGFloat = 12
     private var window: NSWindow?
     private var pendingHideWorkItem: DispatchWorkItem?
+    private var isApplyingProgrammaticResize = false
 
     init(viewModel: NotchBroViewModel) {
         self.viewModel = viewModel
@@ -82,6 +85,21 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         containerView.isClosedDropPreviewVisible = { [weak self] in
             self?.viewModel.closedDropPreviewVisible ?? false
         }
+        containerView.isOpenResizeEnabled = { [weak self] in
+            self?.viewModel.panelVisible ?? false
+        }
+        containerView.openShellRectProvider = { [weak self, weak containerView] in
+            guard let self, let containerView else { return .zero }
+            return self.openShellRect(in: containerView.bounds)
+        }
+        containerView.onOpenResize = { [weak self] edges, startFrame, startScreenLocation, currentScreenLocation in
+            self?.resizeOpenPanel(
+                using: edges,
+                startFrame: startFrame,
+                startScreenLocation: startScreenLocation,
+                currentScreenLocation: currentScreenLocation
+            )
+        }
 
         panel.contentView = containerView
         window = panel
@@ -127,12 +145,15 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
     }
 
     private func updateWindow(animated: Bool, requestFocus: Bool = false) {
+        guard let window else { return }
         let frame = windowFrame()
-        window?.level = .statusBar
-        window?.setFrame(frame, display: true, animate: animated)
+        window.level = .statusBar
+        isApplyingProgrammaticResize = true
+        window.setFrame(frame, display: true, animate: animated)
+        isApplyingProgrammaticResize = false
         syncWindowFocus(requestFocus: requestFocus)
         syncWindowVisibilityAfterInteraction(requestFocus: requestFocus)
-        (window?.contentView as? NotchContainerView)?.refreshClosedInteraction()
+        (window.contentView as? NotchContainerView)?.refreshClosedInteraction()
     }
 
     private func syncWindowFocus(requestFocus: Bool) {
@@ -195,18 +216,93 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         )
     }
 
+    private func openShellRect(in bounds: NSRect) -> NSRect {
+        NSRect(
+            x: bounds.midX - (viewModel.windowWidth / 2),
+            y: bounds.maxY - viewModel.windowHeight,
+            width: viewModel.windowWidth,
+            height: viewModel.windowHeight
+        )
+    }
+
     private func windowFrame() -> NSRect {
-        let screen = NSScreen.main ?? NSScreen.screens.first ?? NSScreen()
-        let screenFrame = screen.frame
-        let width = max(viewModel.terminalWidth + 120, viewModel.restingNotchWidth + 120, 320)
-        let height = max(0, viewModel.terminalHeight + 12)
+        let screen = activeScreen()
+        let screenFrame = screen?.frame ?? .zero
+        let frameSize = openFrameSize()
 
         return NSRect(
-            x: screenFrame.midX - (width / 2),
-            y: screenFrame.maxY - height,
-            width: width,
-            height: height
+            x: screenFrame.midX - (frameSize.width / 2),
+            y: screenFrame.maxY - frameSize.height,
+            width: frameSize.width,
+            height: frameSize.height
         )
+    }
+
+    private func openPanelSize(from frameSize: NSSize) -> CGSize {
+        CGSize(
+            width: max(0, frameSize.width - windowHorizontalPadding),
+            height: max(0, frameSize.height - windowVerticalPadding - viewModel.terminalChromeHeight)
+        )
+    }
+
+    private func frameSize(width: CGFloat, viewportHeight: CGFloat) -> NSSize {
+        NSSize(
+            width: width + windowHorizontalPadding,
+            height: viewportHeight + viewModel.terminalChromeHeight + windowVerticalPadding
+        )
+    }
+
+    private func applyOpenPanelFrame(width: CGFloat, viewportHeight: CGFloat) {
+        guard let window else { return }
+        let clampedWidth = width.clamped(to: viewModel.effectiveOpenPanelWidthRange)
+        let clampedViewportHeight = viewportHeight.clamped(to: viewModel.effectiveOpenPanelViewportHeightRange)
+        viewModel.updateOpenPanelSize(width: clampedWidth, viewportHeight: clampedViewportHeight)
+        let frameSize = frameSize(width: clampedWidth, viewportHeight: clampedViewportHeight)
+        let screenMidX = activeScreen()?.frame.midX ?? window.frame.midX
+        let updatedFrame = NSRect(
+            x: screenMidX - (frameSize.width / 2),
+            y: window.frame.maxY - frameSize.height,
+            width: frameSize.width,
+            height: frameSize.height
+        )
+        isApplyingProgrammaticResize = true
+        window.setFrame(updatedFrame, display: true)
+        isApplyingProgrammaticResize = false
+    }
+
+    private func resizeOpenPanel(
+        using edges: OpenResizeProxyView.ResizeEdges,
+        startFrame: NSRect,
+        startScreenLocation: NSPoint,
+        currentScreenLocation: NSPoint
+    ) {
+        guard viewModel.panelVisible, !isApplyingProgrammaticResize else { return }
+
+        let deltaX = currentScreenLocation.x - startScreenLocation.x
+        let deltaY = currentScreenLocation.y - startScreenLocation.y
+        let initialOpenSize = openPanelSize(from: startFrame.size)
+
+        var targetWidth = initialOpenSize.width
+        var targetViewportHeight = initialOpenSize.height
+
+        if edges.contains(.left) || edges.contains(.right) {
+            let horizontalDelta = edges.contains(.left) ? -deltaX : deltaX
+            targetWidth += horizontalDelta * 2
+        }
+
+        if edges.contains(.bottom) {
+            targetViewportHeight -= deltaY
+        }
+
+        applyOpenPanelFrame(width: targetWidth, viewportHeight: targetViewportHeight)
+    }
+
+    private func activeScreen() -> NSScreen? {
+        window?.screen ?? NSScreen.main ?? NSScreen.screens.first
+    }
+
+    private func openFrameSize() -> NSSize {
+        frameSize(width: viewModel.terminalWidth, viewportHeight: viewModel.terminalViewportMaxHeight)
     }
 }
 
@@ -235,8 +331,9 @@ private final class NotchContainerView: NSView {
             if let hostingView {
                 hostingView.frame = bounds
                 hostingView.autoresizingMask = [.width, .height]
-                addSubview(hostingView, positioned: .below, relativeTo: closedDropProxyView)
+                addSubview(hostingView, positioned: .below, relativeTo: openResizeProxyView)
             }
+            installOpenResizeProxyIfNeeded()
             installClosedDropProxyIfNeeded()
         }
     }
@@ -261,18 +358,30 @@ private final class NotchContainerView: NSView {
     var isClosedDropPreviewVisible: (() -> Bool)? {
         didSet { closedDropProxyView.isClosedDropPreviewVisible = isClosedDropPreviewVisible }
     }
+    var isOpenResizeEnabled: (() -> Bool)? {
+        didSet { openResizeProxyView.isResizeEnabled = isOpenResizeEnabled }
+    }
+    var openShellRectProvider: (() -> NSRect)? {
+        didSet { openResizeProxyView.shellRectProvider = openShellRectProvider }
+    }
+    var onOpenResize: ((OpenResizeProxyView.ResizeEdges, NSRect, NSPoint, NSPoint) -> Void)? {
+        didSet { openResizeProxyView.onResize = onOpenResize }
+    }
 
     private var trackingAreaReference: NSTrackingArea?
     private var isHoveringClosedActivation = false
     private let closedDropProxyView = ClosedDropProxyView(frame: .zero)
+    private let openResizeProxyView = OpenResizeProxyView(frame: .zero)
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        installOpenResizeProxyIfNeeded()
         installClosedDropProxyIfNeeded()
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
+        installOpenResizeProxyIfNeeded()
         installClosedDropProxyIfNeeded()
     }
 
@@ -286,6 +395,7 @@ private final class NotchContainerView: NSView {
         super.layout()
         hostingView?.frame = bounds
         closedDropProxyView.frame = bounds
+        openResizeProxyView.frame = bounds
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -387,6 +497,13 @@ private final class NotchContainerView: NSView {
         addSubview(closedDropProxyView)
     }
 
+    private func installOpenResizeProxyIfNeeded() {
+        guard openResizeProxyView.superview !== self else { return }
+        openResizeProxyView.frame = bounds
+        openResizeProxyView.autoresizingMask = [.width, .height]
+        addSubview(openResizeProxyView)
+    }
+
     private func expandedActivationRect() -> NSRect {
         (activationRectProvider?() ?? .zero).insetBy(dx: -1, dy: -2)
     }
@@ -397,6 +514,177 @@ private final class NotchContainerView: NSView {
             point.x <= rect.maxX &&
             point.y >= rect.minY &&
             point.y <= rect.maxY + 1
+    }
+}
+
+final class OpenResizeProxyView: NSView {
+    struct ResizeEdges: OptionSet {
+        let rawValue: Int
+
+        static let left = ResizeEdges(rawValue: 1 << 0)
+        static let right = ResizeEdges(rawValue: 1 << 1)
+        static let bottom = ResizeEdges(rawValue: 1 << 2)
+    }
+
+    var isResizeEnabled: (() -> Bool)?
+    var shellRectProvider: (() -> NSRect)?
+    var onResize: ((ResizeEdges, NSRect, NSPoint, NSPoint) -> Void)?
+
+    private let edgeThickness: CGFloat = 22
+    private let cornerSize: CGFloat = 28
+    private let edgeOutset: CGFloat = 10
+
+    override func resetCursorRects() {
+        discardCursorRects()
+        guard isResizeEnabled?() == true else { return }
+
+        let shellRect = shellRectProvider?() ?? .zero
+        for (rect, cursor) in resizeCursorRects(around: shellRect) {
+            addCursorRect(rect, cursor: cursor)
+        }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        window?.invalidateCursorRects(for: self)
+    }
+
+    override func layout() {
+        super.layout()
+        window?.invalidateCursorRects(for: self)
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard isResizeEnabled?() == true else { return nil }
+        return resizeEdges(at: point).isEmpty ? nil : self
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard isResizeEnabled?() == true, let window else {
+            super.mouseDown(with: event)
+            return
+        }
+
+        let localPoint = convert(event.locationInWindow, from: nil)
+        let edges = resizeEdges(at: localPoint)
+        guard !edges.isEmpty else {
+            super.mouseDown(with: event)
+            return
+        }
+
+        let startFrame = window.frame
+        let startScreenLocation = NSEvent.mouseLocation
+
+        while let nextEvent = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
+            switch nextEvent.type {
+            case .leftMouseDragged:
+                onResize?(edges, startFrame, startScreenLocation, NSEvent.mouseLocation)
+            case .leftMouseUp:
+                onResize?(edges, startFrame, startScreenLocation, NSEvent.mouseLocation)
+                return
+            default:
+                break
+            }
+        }
+    }
+
+    private func resizeEdges(at point: NSPoint) -> ResizeEdges {
+        let shellRect = shellRectProvider?() ?? .zero
+        guard shellRect.width > 0, shellRect.height > 0 else { return [] }
+
+        let bottomLeftCorner = NSRect(
+            x: shellRect.minX - edgeOutset,
+            y: shellRect.minY - edgeOutset,
+            width: cornerSize + edgeOutset,
+            height: cornerSize + edgeOutset
+        )
+        let bottomRightCorner = NSRect(
+            x: shellRect.maxX - cornerSize,
+            y: shellRect.minY - edgeOutset,
+            width: cornerSize + edgeOutset,
+            height: cornerSize + edgeOutset
+        )
+        var edges: ResizeEdges = []
+        if bottomLeftCorner.contains(point) {
+            return [.left, .bottom]
+        }
+        if bottomRightCorner.contains(point) {
+            return [.right, .bottom]
+        }
+
+        let leftBand = NSRect(
+            x: shellRect.minX - edgeOutset,
+            y: shellRect.minY,
+            width: edgeThickness + edgeOutset,
+            height: shellRect.height
+        )
+        let rightBand = NSRect(
+            x: shellRect.maxX - edgeThickness,
+            y: shellRect.minY,
+            width: edgeThickness + edgeOutset,
+            height: shellRect.height
+        )
+        let bottomBand = NSRect(
+            x: shellRect.minX,
+            y: shellRect.minY - edgeOutset,
+            width: shellRect.width,
+            height: edgeThickness + edgeOutset
+        )
+
+        if leftBand.contains(point) {
+            edges.insert(.left)
+        } else if rightBand.contains(point) {
+            edges.insert(.right)
+        }
+
+        if bottomBand.contains(point) {
+            edges.insert(.bottom)
+        }
+
+        return edges
+    }
+
+    private func resizeCursorRects(around shellRect: NSRect) -> [(NSRect, NSCursor)] {
+        guard shellRect.width > 0, shellRect.height > 0 else { return [] }
+
+        let leftRect = NSRect(
+            x: shellRect.minX - edgeOutset,
+            y: shellRect.minY + cornerSize,
+            width: edgeThickness + edgeOutset,
+            height: max(0, shellRect.height - cornerSize)
+        )
+        let rightRect = NSRect(
+            x: shellRect.maxX - edgeThickness,
+            y: shellRect.minY + cornerSize,
+            width: edgeThickness + edgeOutset,
+            height: max(0, shellRect.height - cornerSize)
+        )
+        let bottomRect = NSRect(
+            x: shellRect.minX + cornerSize,
+            y: shellRect.minY - edgeOutset,
+            width: max(0, shellRect.width - (cornerSize * 2)),
+            height: edgeThickness + edgeOutset
+        )
+        let bottomLeftRect = NSRect(
+            x: shellRect.minX - edgeOutset,
+            y: shellRect.minY - edgeOutset,
+            width: cornerSize + edgeOutset,
+            height: cornerSize + edgeOutset
+        )
+        let bottomRightRect = NSRect(
+            x: shellRect.maxX - cornerSize,
+            y: shellRect.minY - edgeOutset,
+            width: cornerSize + edgeOutset,
+            height: cornerSize + edgeOutset
+        )
+
+        return [
+            (leftRect, .resizeLeftRight),
+            (rightRect, .resizeLeftRight),
+            (bottomRect, .resizeUpDown),
+            (bottomLeftRect, .closedHand),
+            (bottomRightRect, .closedHand)
+        ]
     }
 }
 
@@ -490,5 +778,11 @@ private final class ClosedDropProxyView: NSView {
         guard targeted != isClosedDropTargeted else { return }
         isClosedDropTargeted = targeted
         onClosedDropTargetChanged?(targeted)
+    }
+}
+
+private extension CGFloat {
+    func clamped(to range: ClosedRange<CGFloat>) -> CGFloat {
+        Swift.min(Swift.max(self, range.lowerBound), range.upperBound)
     }
 }

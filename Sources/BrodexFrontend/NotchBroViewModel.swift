@@ -18,7 +18,14 @@ final class NotchBroViewModel: TerminalSessionControllerDelegate {
         case openTarget
     }
 
-    private let shellAnimation = Animation.spring(response: 0.34, dampingFraction: 0.84)
+    private let shellAnimationResponse = 0.34
+    private let shellAnimationDampingFraction = 0.84
+    private let openPanelWidthDefault: CGFloat = 760
+    private let openPanelViewportHeightDefault: CGFloat = 560
+    private let openPanelWidthRange: ClosedRange<CGFloat> = 640...1_280
+    private let openPanelViewportHeightRange: ClosedRange<CGFloat> = 360...820
+    private let openPanelWidthKey = "NotchBro.openPanelWidth"
+    private let openPanelViewportHeightKey = "NotchBro.openPanelViewportHeight"
     let shellPath: String
     let workingDirectory: String
 
@@ -27,6 +34,8 @@ final class NotchBroViewModel: TerminalSessionControllerDelegate {
     let terminalSession: TerminalSessionController
     var sessionRunning = false
     var sessionExitCode: Int32?
+    var openPanelWidth: CGFloat
+    var openPanelViewportHeight: CGFloat
 
     init(shellPath: String? = nil, workingDirectory: String? = nil, startTerminalSession: Bool = true) {
         let environment = ProcessInfo.processInfo.environment
@@ -44,6 +53,17 @@ final class NotchBroViewModel: TerminalSessionControllerDelegate {
 
         self.shellPath = resolvedShell
         self.workingDirectory = cwd
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: openPanelWidthKey) != nil {
+            openPanelWidth = defaults.double(forKey: openPanelWidthKey)
+        } else {
+            openPanelWidth = openPanelWidthDefault
+        }
+        if defaults.object(forKey: openPanelViewportHeightKey) != nil {
+            openPanelViewportHeight = defaults.double(forKey: openPanelViewportHeightKey)
+        } else {
+            openPanelViewportHeight = openPanelViewportHeightDefault
+        }
         terminalSession = TerminalSessionController(
             shellPath: resolvedShell,
             workingDirectory: cwd,
@@ -52,6 +72,7 @@ final class NotchBroViewModel: TerminalSessionControllerDelegate {
         terminalSession.delegate = self
         sessionRunning = terminalSession.sessionRunning
         sessionExitCode = terminalSession.sessionExitCode
+        clampOpenPanelSize()
     }
 
     var panelVisible: Bool {
@@ -84,6 +105,14 @@ final class NotchBroViewModel: TerminalSessionControllerDelegate {
         return "Stopped"
     }
 
+    var shellTransitionAnimation: Animation {
+        let scale = openPanelAnimationScale
+        return .spring(
+            response: shellAnimationResponse * scale,
+            dampingFraction: min(0.92, shellAnimationDampingFraction + ((scale - 1) * 0.05))
+        )
+    }
+
     private var hardwareNotchSize: CGSize {
         NSScreen.builtin?.notchSize ?? NSScreen.main?.notchSize ?? CGSize(width: 184, height: 32)
     }
@@ -106,7 +135,7 @@ final class NotchBroViewModel: TerminalSessionControllerDelegate {
     }
 
     var terminalWidth: CGFloat {
-        760
+        openPanelWidth
     }
 
     var closedDropPreviewWidth: CGFloat {
@@ -114,7 +143,7 @@ final class NotchBroViewModel: TerminalSessionControllerDelegate {
     }
 
     var terminalViewportMaxHeight: CGFloat {
-        560
+        openPanelViewportHeight
     }
 
     var closedDropPreviewHeight: CGFloat {
@@ -202,11 +231,59 @@ final class NotchBroViewModel: TerminalSessionControllerDelegate {
         terminalSession.focus()
     }
 
+    func updateOpenPanelSize(width: CGFloat, viewportHeight: CGFloat) {
+        let clampedWidth = width.clamped(to: effectiveOpenPanelWidthRange)
+        let clampedHeight = viewportHeight.clamped(to: effectiveOpenPanelViewportHeightRange)
+        guard clampedWidth != openPanelWidth || clampedHeight != openPanelViewportHeight else { return }
+
+        openPanelWidth = clampedWidth
+        openPanelViewportHeight = clampedHeight
+
+        let defaults = UserDefaults.standard
+        defaults.set(Double(clampedWidth), forKey: openPanelWidthKey)
+        defaults.set(Double(clampedHeight), forKey: openPanelViewportHeightKey)
+    }
+
+    var effectiveOpenPanelWidthRange: ClosedRange<CGFloat> {
+        let minimum = max(openPanelWidthRange.lowerBound, closedDropPreviewWidth)
+        let maximum = max(minimum, min(openPanelWidthRange.upperBound, maxUsableOpenPanelWidth))
+        return minimum...maximum
+    }
+
+    var effectiveOpenPanelViewportHeightRange: ClosedRange<CGFloat> {
+        let minimum = max(openPanelViewportHeightRange.lowerBound, 240)
+        let maximum = max(minimum, min(openPanelViewportHeightRange.upperBound, maxUsableOpenPanelViewportHeight))
+        return minimum...maximum
+    }
+
+    private var maxUsableOpenPanelWidth: CGFloat {
+        let screen = NSScreen.main ?? NSScreen.builtin ?? NSScreen.screens.first
+        let visibleWidth = screen?.visibleFrame.width ?? openPanelWidthRange.upperBound
+        return max(openPanelWidthRange.lowerBound, visibleWidth - 120)
+    }
+
+    private var maxUsableOpenPanelViewportHeight: CGFloat {
+        let screen = NSScreen.main ?? NSScreen.builtin ?? NSScreen.screens.first
+        let visibleHeight = screen?.visibleFrame.height ?? openPanelViewportHeightRange.upperBound
+        return max(openPanelViewportHeightRange.lowerBound, visibleHeight - terminalChromeHeight - 48)
+    }
+
+    private func clampOpenPanelSize() {
+        updateOpenPanelSize(width: openPanelWidth, viewportHeight: openPanelViewportHeight)
+    }
+
+    private var openPanelAnimationScale: Double {
+        let widthScale = openPanelWidth / openPanelWidthDefault
+        let heightScale = openPanelViewportHeight / openPanelViewportHeightDefault
+        let combinedScale = sqrt(Double(widthScale * heightScale))
+        return min(max(combinedScale, 1.0), 1.3)
+    }
+
     private func setShellState(_ newValue: ShellState) {
         guard shellState != newValue else { return }
         switch (shellState, newValue) {
         case (.hidden, .hover), (.hover, .hidden):
-            withAnimation(shellAnimation) {
+            withAnimation(shellTransitionAnimation) {
                 shellState = newValue
             }
         default:
@@ -233,6 +310,12 @@ final class NotchBroViewModel: TerminalSessionControllerDelegate {
     func terminalSessionDidExit(_ controller: TerminalSessionController, exitCode: Int32?) {
         sessionRunning = false
         sessionExitCode = exitCode
+    }
+}
+
+private extension CGFloat {
+    func clamped(to range: ClosedRange<CGFloat>) -> CGFloat {
+        Swift.min(Swift.max(self, range.lowerBound), range.upperBound)
     }
 }
 
