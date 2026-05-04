@@ -22,10 +22,6 @@ dist/Brodex.app.zip
 Because this version uses ad-hoc signing instead of a paid Apple Developer ID,
 macOS may ask people to use right-click > `Open` the first time they launch it.
 
-## Preview
-
-![Brodex GitHub Preview](docs/assets/github-repo-screenshot.png)
-
 ## Features
 
 - Persistent shell session inside a notch-style floating panel
