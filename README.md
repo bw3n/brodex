@@ -1,46 +1,76 @@
-# Brodex V1
+# Brodex
 
-This package is the UI-only start for Brodex V1.
+Brodex is a macOS notch utility app that keeps a persistent terminal session in
+a compact floating panel.
 
-It keeps the frontend source in `Sources/BrodexFrontend`.
+It is built for a fast, low-friction workflow:
+- hover the notch to preview it
+- open into a larger terminal panel when you need it
+- keep the same shell session alive between opens
+- drop files into the panel to insert paths into your prompt
 
-## Build
+## Download
 
-```bash
-cd /Users/jerng5/Desktop/BRODEX/V3
-swift build
-```
+Download the latest app from GitHub Releases once a release is published.
 
-## Package as a local app
-
-```bash
-cd /Users/jerng5/Desktop/BRODEX/V3
-./Scripts/package_app.sh
-```
-
-The packaging script looks for an optional repo icon at:
+For early friend-sharing builds, use the packaged artifact:
 
 ```text
-/Users/jerng5/Desktop/BRODEX/V3/Packaging/BRODEX.png
+dist/Brodex.app.zip
 ```
 
-If that file is missing, it generates a fallback icon automatically.
+Because this version uses ad-hoc signing instead of a paid Apple Developer ID,
+macOS may ask people to use right-click > `Open` the first time they launch it.
+
+## Preview
+
+![Brodex GitHub Preview](docs/assets/github-repo-screenshot.png)
+
+## Features
+
+- Persistent shell session inside a notch-style floating panel
+- Resizable expanded terminal view
+- Drag-and-drop file path insertion
+- Menu bar utility app with no Dock icon
+- Packaged as a standalone macOS `.app`
+
+## Package The App
+
+```bash
+swift build
+./Scripts/package_app.sh
+```
 
 This creates:
 
 ```text
-/Users/jerng5/Desktop/BRODEX/V3/dist/Brodex.app
-/Users/jerng5/Desktop/BRODEX/V3/dist/Brodex.app.zip
+dist/Brodex.app
+dist/Brodex.app.zip
 ```
 
-The packaged app is configured as a utility app:
-- no Dock icon
-- menu bar icon
-- notch terminal behavior preserved
+The packaging script looks for an optional icon at:
 
-## Share with friends
+```text
+Packaging/BRODEX.png
+```
 
-Upload `dist/Brodex.app.zip` to a GitHub Release. Friends can download the zip,
-extract `Brodex.app`, and open it on macOS. Because this build uses ad-hoc
-signing instead of a paid Apple Developer ID, macOS may ask them to use
-right-click > `Open` the first time they launch it.
+If that file is missing, it generates a fallback icon automatically.
+
+## Share With Friends
+
+1. Run `./Scripts/package_app.sh`
+2. Upload `dist/Brodex.app.zip` to a GitHub Release
+3. Share the Release link
+
+## Local Development
+
+```bash
+swift build
+swift run
+```
+
+## Project Structure
+
+- `Sources/BrodexFrontend`: app source
+- `Scripts/package_app.sh`: app bundle and zip packaging
+- `Packaging/Info.plist`: app bundle metadata
